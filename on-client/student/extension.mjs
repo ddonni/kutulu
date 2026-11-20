@@ -489,36 +489,115 @@ function renderAiConnectionView(input = {}) {
   return root;
 }
 
-// 18단계에서 넓힙니다. 지금은 설명 성공 시 사건 ID·요약, 실패 시 안전한 code·message 만 보여 줍니다.
+// ---------- 18단계: 근거에 연결된 AI 보안 이벤트 설명 (renderExplanation 완성) ----------
+// AI 설명은 해석이며 참고 정보입니다. 사실 판단은 근거 글과 연동 시스템이 알려 준 상태로 합니다.
+// 설명·제안만으로 조치를 실행하지 않으며 실행 버튼도 만들지 않습니다.
+const EXPLANATION_FAILURE_REASON = {
+  ON_AI_INVALID_INPUT: '근거 부족: 설명에 필요한 사건 근거·규칙을 확인할 수 없습니다.',
+  ON_AI_INVALID_OUTPUT: '근거가 맞지 않음: 응답 형식이나 근거 ID가 이 기록과 맞지 않습니다. AI가 이미 실행했다고 답한 설명도 쓸 수 없습니다.',
+};
+const STATE_FIELDS = [
+  ['access', '접속', ACCESS_STATE_TEXT],
+  ['session', '세션', SESSION_STATUS_TEXT],
+  ['device', '기기', DEVICE_STATUS_TEXT],
+];
+
+// 받은 설명이 지금 고른 기록과 맞는지 다시 대조합니다. 맞지 않으면 까닭을 돌려주고 내용을 지어내지 않습니다.
+function explanationMismatch(data, event) {
+  const evidenceIds = new Set((Array.isArray(event.evidence) ? event.evidence : []).map(e => e && e.id).filter(Boolean));
+  const supported = new Set(Array.isArray(event.supportedActions) ? event.supportedActions : []);
+  if (typeof data.summary !== 'string' || !data.summary) return 'AI 요약이 없습니다.';
+  if (!Array.isArray(data.evidenceIds) || !data.evidenceIds.length) return '인용한 근거 ID가 없습니다.';
+  const missing = data.evidenceIds.filter(id => !evidenceIds.has(id));
+  if (missing.length) return `이 기록에 없는 근거 ID를 인용했습니다: ${missing.map(id => safeCode(id)).join(', ')}`;
+  if (data.executed !== false) return 'AI가 이미 실행했다고 답한 설명은 쓸 수 없습니다.';
+  if (data.requiresHumanConfirmation !== true) return '사람 확인 필요 여부를 확인할 수 없습니다.';
+  const proposals = Array.isArray(data.proposals) ? data.proposals : null;
+  if (!proposals) return '제안 목록 형식을 확인할 수 없습니다.';
+  for (const p of proposals) {
+    if (!p || !supported.has(p.action)) return '연동 시스템이 지원하지 않는 조치를 제안했습니다.';
+    if (!Array.isArray(p.evidenceIds) || !p.evidenceIds.length || p.evidenceIds.some(id => !evidenceIds.has(id))) return '제안의 근거 ID가 이 기록과 맞지 않습니다.';
+  }
+  return null;
+}
+
 function renderExplanationView(input = {}) {
+  // 매번 새 DOM 을 만들어 다른 기록 선택·다시 불러오기·실패 때 이전 설명과 성공 속성이 남지 않습니다.
   const root = make('div', { className: 'explanation-view' });
   const add = (...nodes) => root.append(...nodes.filter(Boolean));
-  const event = input.event && typeof input.event === 'object' ? input.event : null;
+  const event = input.event && typeof input.event === 'object' && typeof input.event.id === 'string' && input.event.id ? input.event : null;
   const explanation = input.explanation && typeof input.explanation === 'object' ? input.explanation : {};
   const status = typeof explanation.status === 'string' ? explanation.status : 'unknown';
-  const eventId = event && typeof event.id === 'string' && event.id ? event.id : null;
+  const keepRecords = '기록은 그대로입니다. AI 연결·응답 문제는 과제 실패가 아닙니다.';
 
-  if (status === 'ok' && eventId) {
-    root.dataset.studentExplanationEvent = eventId;
-    const data = explanation.data && typeof explanation.data === 'object' ? explanation.data : {};
+  // 1) 오류는 event 가 null 이어도 먼저 보여 줍니다(근거 부족 등).
+  if (status === 'error') {
+    const code = safeCode(explanation.error && explanation.error.code);
     add(
-      make('p', { className: 'state state-ok', text: `AI 사건 설명 · 사건 ID ${eventId}`, state: 'ok' }),
+      make('p', { className: 'state state-error', state: 'error', text: `AI 설명 실패: ${textOf(explanation.error && explanation.error.message, '서버 메시지 없음')}` }),
       make('dl', {}, [
-        make('dt', { text: '사건 ID' }), make('dd', { text: eventId }),
-        make('dt', { text: '설명 요약' }), make('dd', { text: textOf(data.summary, '요약 없음') }),
-        make('dt', { text: '설명 시각' }), make('dd', { text: timeText(input.checkedAt) }),
-      ]),
-      make('p', { className: 'muted', text: 'AI 설명은 참고 정보이며 어떤 조치도 실행하지 않았습니다.' }),
+        make('dt', { text: '오류 코드' }), make('dd', { text: code }),
+        make('dt', { text: '실패 이유' }), make('dd', { text: EXPLANATION_FAILURE_REASON[code] || `${aiGroupOf(code).cause}: ${aiGroupOf(code).guide}` }),
+        event ? make('dt', { text: '사건 ID' }) : null, event ? make('dd', { text: event.id }) : null,
+      ].filter(Boolean)),
+      make('p', { text: keepRecords }),
     );
     return root;
   }
-  if (status === 'error') {
-    add(...aiErrorLines(explanation.error, 'AI 사건 설명'), make('p', { text: `보안 기록은 그대로입니다${eventId ? ` (사건 ID ${eventId})` : ''}.` }));
+  if (!event) { add(make('p', { className: 'state state-empty', text: '보안 기록에서 기록을 먼저 고르세요.', state: 'no-event' })); return root; }
+  if (status === 'loading') { add(make('p', { className: 'state state-loading', text: `AI 설명 요청 중 · 사건 ID ${event.id}`, state: 'loading' })); return root; }
+  if (status !== 'ok') { add(make('p', { className: 'state state-empty', text: `사건 ID ${event.id}의 AI 설명은 아직 요청하지 않았습니다.`, state: 'idle' })); return root; }
+
+  const data = explanation.data && typeof explanation.data === 'object' ? explanation.data : {};
+  const mismatch = explanationMismatch(data, event);
+  if (mismatch) {
+    // 근거 불일치 화면에는 성공 속성을 붙이지 않습니다.
+    add(make('p', { className: 'state state-error', state: 'mismatch', text: `AI 설명을 쓸 수 없습니다: 근거가 맞지 않음 · 사건 ID ${event.id}` }),
+      make('p', { text: mismatch }), make('p', { text: keepRecords }));
     return root;
   }
-  if (status === 'loading') { add(make('p', { className: 'state state-loading', text: `AI 사건 설명 요청 중${eventId ? ` · 사건 ID ${eventId}` : ''}`, state: 'loading' })); return root; }
-  add(make('p', { className: 'state state-empty', state: 'idle',
-    text: eventId ? `사건 ID ${eventId}의 AI 설명은 아직 요청하지 않았습니다.` : 'AI 설명을 요청한 사건이 없습니다. 보안 기록에서 사건을 골라 설명을 요청하세요.' }));
+
+  // 2) 성공한 설명에만 성공 속성을 붙입니다.
+  root.dataset.studentExplanationEvent = event.id;
+  const evidenceById = new Map(event.evidence.map(e => [e.id, e]));
+  const rules = Array.isArray(event.rules) ? event.rules : [];
+  const state = event.state && typeof event.state === 'object' ? event.state : {};
+  const unknownStates = STATE_FIELDS.filter(([key, , map]) => knownOr(map, state[key]) === 'unknown');
+  const supported = Array.isArray(event.supportedActions) ? event.supportedActions : [];
+
+  add(
+    make('h3', { text: 'AI 설명(참고용)' }),
+    make('dl', {}, [
+      make('dt', { text: '사건 ID' }), make('dd', { text: event.id }),
+      make('dt', { text: 'AI 요약' }), make('dd', { text: data.summary }),
+      make('dt', { text: '설명 시각' }), make('dd', { text: timeText(input.checkedAt) }),
+    ]),
+    make('p', { className: 'muted', text: 'AI 설명은 해석입니다. 사실 판단은 아래 근거 글과 연동 시스템이 알려 준 상태로 하세요.' }),
+    // 3) 인용한 근거 ID 와 같은 id 의 근거 글, 규칙 id·글
+    make('h4', { text: '인용한 근거' }),
+    make('ul', {}, data.evidenceIds.map(id => make('li', { text: `${id} — ${textOf(evidenceById.get(id).text, '근거 글 없음')}` }))),
+    make('h4', { text: '규칙' }),
+    rules.length ? make('ul', {}, rules.map(r => make('li', { text: `${textOf(r && r.id, 'ID 정보 없음')} — ${textOf(r && r.text, '규칙 글 없음')}` })))
+      : make('p', { className: 'state state-empty', text: '규칙 정보가 없습니다.' }),
+    // 4) 현재 상태와 확인 불가 목록. unknown 을 정상·안전으로 바꾸지 않습니다.
+    make('h4', { text: '현재 상태' }),
+    make('dl', {}, STATE_FIELDS.flatMap(([key, name, map]) => [make('dt', { text: name }), make('dd', { text: withCode(map, state[key]), state: knownOr(map, state[key]) })])),
+    make('h4', { text: '확인 불가 상태' }),
+    unknownStates.length ? make('ul', {}, unknownStates.map(([key, name]) => make('li', { text: `${name}: 확인 불가(${typeof state[key] === 'string' && state[key] ? state[key] : 'unknown'})`, state: 'unknown' })))
+      : make('p', { text: '없음' }),
+    // 5)·6) 제안: 이유와 미실행 상태. 실행 버튼은 만들지 않습니다.
+    make('h4', { text: 'AI 제안' }),
+  );
+  const proposals = data.proposals;
+  if (!proposals.length) {
+    add(make('p', { className: 'state state-empty', state: 'no-proposal', text: supported.length
+      ? 'AI가 제안한 조치가 없습니다.'
+      : '연동 시스템이 지원하는 조치가 없어 제안이 없습니다(정상).' }));
+  } else {
+    add(make('ul', {}, proposals.map(p => make('li', {
+      text: `조치 ${p.action} · 이유: ${textOf(p.reason, '이유 없음')} · 근거 ${p.evidenceIds.join(', ')} · 사람 확인이 필요하며 실행되지 않았습니다.` }))));
+  }
+  add(make('p', { className: 'muted', text: '설명·제안만으로 보안 조치가 실행되지 않습니다.' }));
   return root;
 }
 
