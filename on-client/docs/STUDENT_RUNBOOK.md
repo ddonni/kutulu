@@ -57,6 +57,8 @@ Git 저장소의 최상위는 `on-client`가 아니라 그 위의 프로젝트 �
 cd "$env:LOCALAPPDATA\ALEPH\Workbench\projects\크툴루-방어전\on-client"
 ```
 
+다른 폴더에 저장소를 `git clone` 한 경우에는 그 폴더 안의 `on-client` 에서 같은 명령을 실행합니다. 새 폴더 재현 절차와 결과는 [STUDENT_RELEASE_RECORD.md](STUDENT_RELEASE_RECORD.md) 에 있습니다(확인함).
+
 ### 4-2. 실행 명령
 
 | 목적 | 명령(앱 폴더에서) | 이 PC 확인 | 정상 시작 신호(창에 나오는 줄) |

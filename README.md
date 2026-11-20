@@ -33,3 +33,7 @@
 - 실행(확인함): 앱 폴더 `on-client`에서 `npm.cmd run demo`(예제 자료) 또는 `npm.cmd start`(연결 없는 기본 실행) → 브라우저 `http://127.0.0.1:5189`
 
 실제 SDP 연결, AI 사건 설명 성공, 조치 집행, 실제 OSV 조회는 아직 확인하지 못했습니다. 목록은 설명서 8장 "기다림(UNV)"에 있습니다. 비밀 값은 저장소에 두지 않습니다.
+
+## 버전과 재현 기록
+
+**검증 중인 버전**(v1.0 아님)입니다. 같은 커밋을 새 폴더에 받아 실행한 재현 기록, 데이터 보존 계획, 미해결 사항은 [on-client/docs/STUDENT_RELEASE_RECORD.md](on-client/docs/STUDENT_RELEASE_RECORD.md)에 있습니다. 재현 기록은 학생 진술이며, 원문 검토 통과는 실행 성공 증명이 아닙니다.
